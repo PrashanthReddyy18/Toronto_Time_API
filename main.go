@@ -2,75 +2,101 @@ package main
 
 import (
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"time"
 
-	_ "github.com/go-sql-driver/mysql" // MySQL driver
+	_ "github.com/go-sql-driver/mysql"
 )
 
-var DB *sql.DB
+var db *sql.DB
 
-// Initialize the database connection
+// Init function to establish the database connection
 func Init() {
 	var err error
-	// Replace the connection string with your MySQL credentials
-	DB, err = sql.Open("mysql", "root:Reddy@123@tcp(localhost:3306)/my_toronto_time")
+	// Connect to the MySQL database
+	db, err = sql.Open("mysql", "root:yourpassword@tcp(localhost:3306)/my_toronto_time")
 	if err != nil {
-		log.Fatalf("Error opening database connection: %v\n", err)
+		log.Fatalf("Error connecting to the database: %v", err)
 	}
 
-	// Verify the database connection
-	if err := DB.Ping(); err != nil {
-		log.Fatalf("Error verifying database connection: %v\n", err)
+	// Ensure that the database is accessible
+	if err := db.Ping(); err != nil {
+		log.Fatalf("Error verifying database connection: %v", err)
 	}
-	log.Println("Successfully connected to MySQL database.")
+	log.Println("Database connection established.")
 }
 
-// TimeData struct to structure the JSON response
-type TimeData struct {
-	CurrentTime string `json:"current_time"`
-}
-
-// Handler for the '/current-time' endpoint
-func currentTimeHandler(w http.ResponseWriter, r *http.Request) {
-	// Get the current time in Toronto (Eastern Standard Time)
+// GetCurrentTime retrieves the current time in Toronto and logs it in the database
+func GetCurrentTime(w http.ResponseWriter, r *http.Request) {
+	// Get current time in Toronto
 	location, err := time.LoadLocation("America/Toronto")
 	if err != nil {
-		http.Error(w, "Unable to load Toronto time zone", http.StatusInternalServerError)
+		log.Printf("Error loading Toronto timezone: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
-	torontoTime := time.Now().In(location)
+	currentTime := time.Now().In(location)
 
-	// Insert the current time into the database
-	_, err = DB.Exec("INSERT INTO my_time_log (timestamp) VALUES (?)", torontoTime)
+	// Insert current time into the database
+	_, err = db.Exec("INSERT INTO my_time_log (timestamp) VALUES (?)", currentTime)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Error logging time to database: %v", err), http.StatusInternalServerError)
+		log.Printf("Error inserting time into database: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
 
-	// Prepare the response data
-	timeData := TimeData{
-		CurrentTime: torontoTime.Format("2006-01-02 15:04:05"),
-	}
+	// Log the successful request
+	log.Printf("Inserted time: %v into database.", currentTime)
 
-	// Set the response header to application/json
+	// Send the response
 	w.Header().Set("Content-Type", "application/json")
-
-	// Send the JSON response
-	if err := json.NewEncoder(w).Encode(timeData); err != nil {
-		http.Error(w, fmt.Sprintf("Error encoding JSON response: %v", err), http.StatusInternalServerError)
-	}
+	fmt.Fprintf(w, `{"current_time": "%s"}`, currentTime)
 }
 
+// GetLogs retrieves all the logged times from the database
+func GetLogs(w http.ResponseWriter, r *http.Request) {
+	rows, err := db.Query("SELECT id, timestamp FROM my_time_log")
+	if err != nil {
+		log.Printf("Error querying logs: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var logs []string
+	for rows.Next() {
+		var id int
+		var timestamp string
+		if err := rows.Scan(&id, &timestamp); err != nil {
+			log.Printf("Error scanning log row: %v", err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+		logs = append(logs, fmt.Sprintf("ID: %d, Timestamp: %s", id, timestamp))
+	}
+
+	// Handle any error that occurred during iteration
+	if err := rows.Err(); err != nil {
+		log.Printf("Error while iterating rows: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	// Send the logs as a response
+	w.Header().Set("Content-Type", "application/json")
+	fmt.Fprintf(w, `{"logs": [%s]}`, logs)
+}
+
+// main function to initialize and start the server
 func main() {
 	// Initialize the database connection
 	Init()
 
 	// Setup API routes
-	http.HandleFunc("/current-time", currentTimeHandler)
+	http.HandleFunc("/current-time", GetCurrentTime)
+	http.HandleFunc("/logs", GetLogs)
 
 	// Start the server
 	port := ":8080"
