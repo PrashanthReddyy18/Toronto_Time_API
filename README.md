@@ -15,7 +15,6 @@ This is a simple Go-based API that provides the current time in Toronto (convert
 ### Prerequisites
 
 - **Go**: Version 1.20 or higher installed on your machine.
-- **Docker**: Docker and Docker Compose must be installed to run the application in containers.
 - **MySQL**: The project uses MySQL to store the logged times.
 
 - **Executed the commands**
